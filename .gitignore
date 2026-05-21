@@ -1,0 +1,15 @@
+.DS_Store
+
+# IDE/editor files
+.idea/
+.vscode/
+
+# Compiled executables
+Laborator nr. 1/default/lab1
+Laborator nr. 1/openmp/lab1_openmp
+Laborator nr. 1/openmpi/lab1_openmpi
+Laborator nr. 1/openmpi-v2/lab1_openmpi
+
+# Generated OpenMPI host files
+Laborator nr. 1/openmpi/available_hosts_file
+Laborator nr. 1/openmpi-v2/available_hosts_file

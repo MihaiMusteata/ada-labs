@@ -1,0 +1,30 @@
+Structura directoriului
+
+* available_hosts_file - fişier intern utilizat pentru rularea simulată a aplicaţiei openmpi pe un cluster virtual
+* build_container.sh - comenzi bash de creare a imaginei unui container care are dependeţele instalate pentru compilarea unui program openmpi
+* compile.sh - comenzi bash de compilare a codului din fisierul lab1_openmpi.cpp. Se execută în interiorul containerului openmpi
+* docker-compose.yml - fişier docker-compose pentru simularea unui cluster
+* Dockerfile - fişier docker care conţine comenzile pentru crearea unei imagini de container cu dependenţele necesare
+* lab1_openmpi - fişier executabil rezultant în urma compilării codului din lab1_openmpi.cpp prin executarea fişierului compile.sh în interiorul containerului
+* lab1_openmpi.cpp - implementarea unui ciot al algoritmului de rezolvare a cripto-puzzle-ului cu paralelizare automată realizată cu ajutorul librăriei openmpi
+* run_computations_on_cluster.sh - fişier intern care rulează use case-urile cu 1, 2, 4, 8, 16 şi 32 procese MPI sau doar numărul de procese primit ca parametru
+* sha256.cpp - implementarea algoritmului de hash SHA256
+* sha256.h - fişierul de tip header corespunzător fişierului sha256.cpp
+* start_cluster.sh - comenzi bash de pornire a clusterului virtual cu 32 containere, compilare a aplicaţiei openmpi şi rularea calculelor
+* stop_cluster.sh - comenzi bash de oprire a clusterului virtual
+
+Paşi de urmat
+1) Deschideţi fereastra bash în directoriul curent
+2) Executaţi în bash comanda ./build_container.sh. Aceasta va crea o imagine de container cu numele openmpi
+3) Executaţi în bash comanda ./start_cluster.sh 6. Aceasta va instanţia 32 containere şi va rula aplicaţia openmpi pentru dificultatea 6 cu 1, 2, 4, 8, 16 şi 32 procese MPI
+4) Fişierul available_hosts_file este regenerat automat cu 32 hosturi şi slots=1 pentru fiecare host.
+5) Pentru a reactualiza starea clusterului executaţi ”stop_cluster.sh” şi apoi ”start_cluster.sh 6” pentru a rula aplicaţia openmpi în interiorul clusterului cu setările noi.
+6) Comparaţi timpul obţinut aici cu varianta openmpi-v2: 2 containere x 16 sloturi.
+
+Rulare use case-uri
+1) Pentru a rula toate variantele cu 1, 2, 4, 8, 16 şi 32 procese MPI pentru dificultatea 6, executaţi:
+   ./start_cluster.sh 6
+2) Pentru a rula o singură variantă, transmiteţi şi numărul de procese ca al doilea parametru:
+   ./start_cluster.sh 6 16
+3) În exemplele de mai sus, 6 este dificultatea puzzle-ului. Poate fi schimbată cu altă valoare, de exemplu:
+   ./start_cluster.sh 7

@@ -1,0 +1,17 @@
+name: openmpi-v2
+
+services:
+  lab1-openmpi:
+    stdin_open: true
+    tty: true
+    build:
+      context: .
+    volumes:
+        - .:/home/student/lab1/openmpi-v2
+    ports:
+      - "22"
+    networks:
+      - main
+
+networks:
+  main:
