@@ -1,0 +1,19 @@
+# http://prometheus.io/docs/operating/configuration/
+
+global:
+  evaluation_interval: 45s
+  scrape_interval: 45s
+  scrape_timeout: 30s
+
+# rule_files:
+#   - /etc/prometheus/rules/*.rules
+
+scrape_configs:
+  - job_name: current_node
+    metrics_path: /metrics
+    static_configs:
+    - targets:
+      - node-exporter:9100
+      labels:
+        env: lab_works
+        role: node

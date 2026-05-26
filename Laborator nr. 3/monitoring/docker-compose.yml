@@ -1,0 +1,127 @@
+services:
+  traefik:
+    image: traefik:v3.4
+    container_name: lab3-traefik
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:3232
+    ports:
+      - "3232:3232"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  archive-db:
+    image: postgres:17-alpine
+    container_name: lab3-archive-db
+    environment:
+      POSTGRES_DB: utm_archive
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - archive_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d utm_archive"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - app_internal
+
+  archive-api:
+    image: archive-api:lab3
+    container_name: lab3-archive-api
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Database: Host=archive-db;Port=5432;Database=utm_archive;Username=postgres;Password=postgres
+      Jwt__Issuer: utm-archive-platform
+      Jwt__Audience: utm-archive-platform
+      Jwt__SigningKey: ChangeThisJwtSigningKeyForProduction1234567890
+      Storage__RootPath: /data/uploads
+    volumes:
+      - archive_uploads:/data/uploads
+    depends_on:
+      archive-db:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=monitoring_monitoring
+      - traefik.http.routers.lab3-archive-api.rule=PathPrefix(`/api`) || PathPrefix(`/swagger`) || PathPrefix(`/health`)
+      - traefik.http.routers.lab3-archive-api.entrypoints=web
+      - traefik.http.routers.lab3-archive-api.priority=100
+      - traefik.http.services.lab3-archive-api.loadbalancer.server.port=8080
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - app_internal
+
+  archive-client:
+    image: archive-client:lab3
+    container_name: lab3-archive-client
+    depends_on:
+      - archive-api
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=monitoring_monitoring
+      - traefik.http.routers.lab3-archive-client.rule=PathPrefix(`/`)
+      - traefik.http.routers.lab3-archive-client.entrypoints=web
+      - traefik.http.routers.lab3-archive-client.priority=1
+      - traefik.http.services.lab3-archive-client.loadbalancer.server.port=80
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus
+    container_name: lab3-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus_data:/prometheus
+    depends_on:
+      - archive-api
+      - node-exporter
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana
+    container_name: lab3-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana_datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter
+    container_name: lab3-node-exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+volumes:
+  archive_postgres_data:
+  archive_uploads:
+
+networks:
+  monitoring:
+  app_internal:
