@@ -1,8 +1,58 @@
+# OS files
 .DS_Store
+.AppleDouble
+.LSOverride
 
 # IDE/editor files
 .idea/
 .vscode/
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Environment/local config
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# .NET / C#
+[Bb]in/
+[Oo]bj/
+*.rsuser
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.a
+*.lib
+*.pdb
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+compile_commands.json
+
+# Local Docker/service data
+**/rabbitmq-data/
+**/grafana_data/
+**/prometheus_data/
 
 # Compiled executables
 Laborator nr. 1/default/lab1

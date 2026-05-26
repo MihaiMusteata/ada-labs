@@ -1,0 +1,54 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./rabbitmq-data/data/:/var/lib/rabbitmq/
+      - ./rabbitmq-data/log/:/var/log/rabbitmq:rw
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_NODENAME: rabbit@rabbitmq
+    networks:
+      - main
+
+  lab2_producer: &lab2_ruby_python
+    container_name: lab2_producer
+    build:
+      context: .
+    volumes:
+      - .:/home/student/lab2
+    stdin_open: true
+    tty: true
+    depends_on:
+      - rabbitmq
+    networks:
+      - main
+
+  lab2_ruby_consumer:
+    <<: *lab2_ruby_python
+    container_name: lab2_ruby_consumer
+
+  lab2_python_consumer:
+    <<: *lab2_ruby_python
+    container_name: lab2_python_consumer
+
+  lab2_csharp_consumer:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    container_name: lab2_csharp_consumer
+    volumes:
+      - .:/home/student/lab2
+    working_dir: /home/student/lab2
+    stdin_open: true
+    tty: true
+    depends_on:
+      - rabbitmq
+    networks:
+      - main
+
+networks:
+  main:
