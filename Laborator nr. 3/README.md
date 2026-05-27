@@ -158,16 +158,6 @@ De asemenea, configurația Prometheus folosește calea nouă:
 
 Nu există referințe către vechea cale `./prometheus.yml`.
 
-## Probleme tehnice întâlnite și rezolvare
-
-Prima problemă a fost organizarea fișierelor de configurare. Inițial, configurația Prometheus se afla direct în folderul principal. Pentru o structură mai clară, fișierul a fost mutat în `prometheus/prometheus.yml`, iar `docker-compose.yml` a fost actualizat să monteze noua cale.
-
-A doua problemă a fost configurarea datasource-ului Grafana. Fără provisioning, datasource-ul trebuia adăugat manual din interfața Grafana. Soluția a fost adăugarea fișierului `grafana_datasources/prometheus.yml`, care configurează automat Prometheus ca datasource default.
-
-A treia problemă a fost păstrarea imaginilor aplicației. Imaginile `archive-api:lab3` și `archive-client:lab3` sunt necesare local, dar nu trebuie reconstruite în cadrul laboratorului. Scriptul `start.sh` verifică existența imaginilor și le încarcă automat din arhivele `.tar` dacă lipsesc.
-
-A patra problemă a fost persistența datelor. Grafana și Prometheus montează foldere locale pentru date, astfel încât configurațiile și istoricul să nu fie pierdute la o simplă oprire cu `docker compose down`. Volumele sunt șterse doar la reset complet cu `docker compose down -v`.
-
 ## Concluzii
 
 Laboratorul demonstrează modul în care Prometheus și Grafana pot fi integrate într-un sistem rulat cu Docker Compose. Prometheus colectează metrici atât din aplicația .NET, cât și din Node Exporter, iar Grafana oferă o interfață vizuală pentru analiza acestor metrici.
