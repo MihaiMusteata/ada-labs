@@ -4,23 +4,28 @@ require 'bunny'
 require 'digest/sha2'
 require 'json'
 
-user = 'guest'
-password = 'guest'
-host = 'rabbitmq'
-port = 5672
-queue_name = 'crypto-puzzle-inquiries'
-cancel_exchange_name = 'crypto-puzzle-cancel'
-worker_name = 'Ruby worker'
+USER = 'guest'
+PASSWORD = 'guest'
+HOST = 'rabbitmq'
+PORT = 5672
+QUEUE_NAME = 'crypto-puzzle-chunks'
+CANCEL_EXCHANGE_NAME = 'crypto-puzzle-cancel'
+WORKER_NAME = 'Ruby worker'
+CHECK_INTERVAL = 10_000
 
-def solve_crypto_puzzle(string, difficulty, start, step, cancelled)
+def solve_chunk(string, difficulty, chunk_start, chunk_end, cancelled)
   sha256 = Digest::SHA256.new
   needle = '0' * difficulty
-  n = start
   checks = 0
 
-  loop do
-    if (checks % 1000).zero? && cancelled.call
-      return nil
+  (chunk_start..chunk_end).each do |n|
+    if (checks % CHECK_INTERVAL).zero? && cancelled.call
+      return {
+        status: 'cancelled',
+        worker: WORKER_NAME,
+        chunk_start: chunk_start,
+        chunk_end: chunk_end
+      }
     end
 
     solution_candidate = string + n.to_s
@@ -28,31 +33,39 @@ def solve_crypto_puzzle(string, difficulty, start, step, cancelled)
 
     if result[0...difficulty] == needle
       return {
+        status: 'found',
         solution: solution_candidate,
         nonce: n,
         hash: result,
-        worker: 'Ruby worker'
+        worker: WORKER_NAME,
+        chunk_start: chunk_start,
+        chunk_end: chunk_end
       }
     end
 
-    n += step
     checks += 1
   end
+
+  {
+    status: 'not_found',
+    worker: WORKER_NAME,
+    chunk_start: chunk_start,
+    chunk_end: chunk_end
+  }
 end
 
-connection = Bunny.new(hostname: host, port: port, username: user, password: password)
+connection = Bunny.new(hostname: HOST, port: PORT, username: USER, password: PASSWORD)
 connection.start
-cancel_connection = Bunny.new(hostname: host, port: port, username: user, password: password)
+cancel_connection = Bunny.new(hostname: HOST, port: PORT, username: USER, password: PASSWORD)
 cancel_connection.start
 
 channel = connection.create_channel
 channel.prefetch(1)
 exchange = channel.default_exchange
-
-queue = channel.queue(queue_name, auto_delete: true)
+queue = channel.queue(QUEUE_NAME, auto_delete: true)
 
 cancel_channel = cancel_connection.create_channel
-cancel_exchange = cancel_channel.fanout(cancel_exchange_name)
+cancel_exchange = cancel_channel.fanout(CANCEL_EXCHANGE_NAME)
 cancel_queue = cancel_channel.queue('', exclusive: true, auto_delete: true)
 cancel_queue.bind(cancel_exchange)
 
@@ -66,7 +79,7 @@ cancel_queue.subscribe do |_delivery_info, _properties, payload|
 
   state_lock.synchronize do
     next unless message['correlation_id'] == current_correlation_id
-    next if message['winner'] == worker_name
+    next if message['winner'] == WORKER_NAME
 
     cancelled = true
     winner = message['winner']
@@ -74,16 +87,16 @@ cancel_queue.subscribe do |_delivery_info, _properties, payload|
 end
 
 begin
-  puts 'Ruby worker started...'
-  puts "Listening queue: #{queue_name}"
+  puts 'Ruby chunk worker started...'
+  puts "Listening queue: #{QUEUE_NAME}"
 
   queue.subscribe(block: true, manual_ack: true) do |delivery_info, properties, payload|
     json_payload = JSON.parse(payload)
 
     string = json_payload['string']
     difficulty = json_payload['difficulty']
-    start = json_payload['start'] || 0
-    step = json_payload['step'] || 1
+    chunk_start = json_payload['chunk_start']
+    chunk_end = json_payload['chunk_end']
 
     state_lock.synchronize do
       current_correlation_id = properties.correlation_id
@@ -91,20 +104,20 @@ begin
       winner = nil
     end
 
-    puts "Received task: string=#{string}, difficulty=#{difficulty}, start=#{start}, step=#{step}"
+    puts "Received chunk: #{chunk_start}..#{chunk_end}, difficulty=#{difficulty}"
 
-    result = solve_crypto_puzzle(string, difficulty, start, step, lambda {
+    result = solve_chunk(string, difficulty, chunk_start, chunk_end, lambda {
       state_lock.synchronize { cancelled }
     })
 
-    if result.nil?
+    if result[:status] == 'cancelled'
       stopped_by = state_lock.synchronize { winner || 'another worker' }
       puts "Searching was stopped..... found by another worker (#{stopped_by})"
       channel.ack(delivery_info.delivery_tag)
       next
     end
 
-    puts "Solution found by Ruby worker: nonce=#{result[:nonce]}, hash=#{result[:hash]}"
+    puts "Chunk result by #{WORKER_NAME}: #{result[:status]}, chunk=#{chunk_start}..#{chunk_end}"
 
     exchange.publish(
       result.to_json,

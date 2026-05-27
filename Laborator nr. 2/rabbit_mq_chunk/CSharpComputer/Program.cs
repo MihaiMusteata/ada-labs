@@ -1,6 +1,7 @@
-﻿using System.Text;
-using System.Text.Json;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -8,30 +9,41 @@ const string User = "guest";
 const string Password = "guest";
 const string Host = "rabbitmq";
 const int Port = 5672;
-const string QueueName = "crypto-puzzle-inquiries";
+const string QueueName = "crypto-puzzle-chunks";
 const string CancelExchangeName = "crypto-puzzle-cancel";
 const string WorkerName = "C# worker";
+const long CheckInterval = 10_000;
 
 object stateLock = new();
 string? currentCorrelationId = null;
 string? cancelWinner = null;
 bool cancelRequested = false;
 
-object? SolveCryptoPuzzle(string input, int difficulty, long start, long step)
+var jsonOptions = new JsonSerializerOptions
 {
-    string needle = new string('0', difficulty);
-    long n = start;
+    PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+};
+
+ChunkResult SolveChunk(string input, int difficulty, long chunkStart, long chunkEnd)
+{
+    string needle = new('0', difficulty);
     long checks = 0;
 
-    while (true)
+    for (long n = chunkStart; n <= chunkEnd; n++)
     {
-        if (checks % 1000 == 0)
+        if (checks % CheckInterval == 0)
         {
             lock (stateLock)
             {
                 if (cancelRequested)
                 {
-                    return null;
+                    return new ChunkResult
+                    {
+                        Status = "cancelled",
+                        Worker = WorkerName,
+                        ChunkStart = chunkStart,
+                        ChunkEnd = chunkEnd
+                    };
                 }
             }
         }
@@ -39,23 +51,32 @@ object? SolveCryptoPuzzle(string input, int difficulty, long start, long step)
         string solutionCandidate = input + n;
         byte[] bytes = Encoding.UTF8.GetBytes(solutionCandidate);
         byte[] hashBytes = SHA256.HashData(bytes);
-
         string hash = Convert.ToHexString(hashBytes).ToLowerInvariant();
 
         if (hash.StartsWith(needle))
         {
-            return new
+            return new ChunkResult
             {
-                solution = solutionCandidate,
-                nonce = n,
-                hash = hash,
-                worker = WorkerName
+                Status = "found",
+                Solution = solutionCandidate,
+                Nonce = n,
+                Hash = hash,
+                Worker = WorkerName,
+                ChunkStart = chunkStart,
+                ChunkEnd = chunkEnd
             };
         }
 
-        n += step;
         checks++;
     }
+
+    return new ChunkResult
+    {
+        Status = "not_found",
+        Worker = WorkerName,
+        ChunkStart = chunkStart,
+        ChunkEnd = chunkEnd
+    };
 }
 
 var factory = new ConnectionFactory
@@ -132,7 +153,7 @@ cancelChannel.BasicConsume(
     consumer: cancelConsumer
 );
 
-Console.WriteLine("C# worker started...");
+Console.WriteLine("C# chunk worker started...");
 Console.WriteLine($"Listening queue: {QueueName}");
 
 var consumer = new EventingBasicConsumer(channel);
@@ -144,14 +165,8 @@ consumer.Received += (model, ea) =>
 
     string input = jsonPayload.GetProperty("string").GetString()!;
     int difficulty = jsonPayload.GetProperty("difficulty").GetInt32();
-
-    long start = jsonPayload.TryGetProperty("start", out JsonElement startElement)
-        ? startElement.GetInt64()
-        : 0;
-
-    long step = jsonPayload.TryGetProperty("step", out JsonElement stepElement)
-        ? stepElement.GetInt64()
-        : 1;
+    long chunkStart = jsonPayload.GetProperty("chunk_start").GetInt64();
+    long chunkEnd = jsonPayload.GetProperty("chunk_end").GetInt64();
 
     lock (stateLock)
     {
@@ -160,13 +175,11 @@ consumer.Received += (model, ea) =>
         cancelRequested = false;
     }
 
-    Console.WriteLine(
-        $"Received task: string={input}, difficulty={difficulty}, start={start}, step={step}"
-    );
+    Console.WriteLine($"Received chunk: {chunkStart}..{chunkEnd}, difficulty={difficulty}");
 
-    object? result = SolveCryptoPuzzle(input, difficulty, start, step);
+    ChunkResult result = SolveChunk(input, difficulty, chunkStart, chunkEnd);
 
-    if (result is null)
+    if (result.Status == "cancelled")
     {
         string stoppedBy;
 
@@ -185,10 +198,10 @@ consumer.Received += (model, ea) =>
         return;
     }
 
-    string response = JsonSerializer.Serialize(result);
-    byte[] responseBytes = Encoding.UTF8.GetBytes(response);
+    Console.WriteLine($"Chunk result by {WorkerName}: {result.Status}, chunk={chunkStart}..{chunkEnd}");
 
-    Console.WriteLine($"Solution found by C# worker: {response}");
+    string response = JsonSerializer.Serialize(result, jsonOptions);
+    byte[] responseBytes = Encoding.UTF8.GetBytes(response);
 
     var replyProperties = channel.CreateBasicProperties();
     replyProperties.CorrelationId = ea.BasicProperties.CorrelationId;
@@ -212,5 +225,16 @@ channel.BasicConsume(
     consumer: consumer
 );
 
-Console.WriteLine("Press Enter to stop C# worker.");
+Console.WriteLine("Press Enter to stop C# chunk worker.");
 Console.ReadLine();
+
+internal sealed class ChunkResult
+{
+    public string Status { get; set; } = "";
+    public string? Solution { get; set; }
+    public long? Nonce { get; set; }
+    public string? Hash { get; set; }
+    public string Worker { get; set; } = "";
+    public long ChunkStart { get; set; }
+    public long ChunkEnd { get; set; }
+}

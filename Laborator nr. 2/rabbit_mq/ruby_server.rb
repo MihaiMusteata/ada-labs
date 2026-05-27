@@ -9,7 +9,7 @@ password = 'guest'
 host = 'rabbitmq'
 port = 5672
 queue_name = 'crypto-puzzle-inquiries'
-reply_queue_name = 'crypto-puzzle-responses'
+cancel_exchange_name = 'crypto-puzzle-cancel'
 
 workers_count = 3
 
@@ -24,8 +24,9 @@ final_response = nil
 
 channel = connection.create_channel
 exchange = channel.default_exchange
+cancel_exchange = channel.fanout(cancel_exchange_name)
 queue = channel.queue(queue_name, auto_delete: true)
-reply_queue = channel.queue(reply_queue_name, auto_delete: true, exclusive: true)
+reply_queue = channel.queue('', auto_delete: true, exclusive: true)
 
 reply_queue.subscribe do |_delivery_info, _properties, payload|
   lock.synchronize do
@@ -42,7 +43,10 @@ begin
     puts 'Press Ctrl+C to exit'
     puts 'Enter difficulty of puzzle from 1 to 8:'
 
-    difficulty = $stdin.gets.to_i
+    line = $stdin.gets
+    break if line.nil?
+
+    difficulty = line.to_i
 
     if (1..8).include?(difficulty)
       received_response = false
@@ -76,6 +80,13 @@ begin
       end
 
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time
+      response = JSON.parse(final_response)
+      cancel_exchange.publish(
+        {
+          correlation_id: correlation_id,
+          winner: response['worker']
+        }.to_json
+      )
 
       puts "Response to crypto-puzzle is: #{final_response}"
       puts "Elapsed time: #{(elapsed * 1000).round(2)} ms"

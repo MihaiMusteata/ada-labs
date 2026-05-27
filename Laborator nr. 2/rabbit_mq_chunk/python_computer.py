@@ -1,15 +1,17 @@
-import json
 import hashlib
+import json
 import threading
+
 import pika
 
 USER = "guest"
 PASSWORD = "guest"
 HOST = "rabbitmq"
 PORT = 5672
-QUEUE_NAME = "crypto-puzzle-inquiries"
+QUEUE_NAME = "crypto-puzzle-chunks"
 CANCEL_EXCHANGE_NAME = "crypto-puzzle-cancel"
 WORKER_NAME = "Python worker"
+CHECK_INTERVAL = 10000
 
 state_lock = threading.Lock()
 current_correlation_id = None
@@ -17,46 +19,55 @@ cancel_event = threading.Event()
 cancel_winner = None
 
 
-def solve_crypto_puzzle(string, difficulty, start, step):
+def solve_chunk(string, difficulty, chunk_start, chunk_end):
     needle = "0" * difficulty
-    n = start
     checks = 0
 
-    while True:
-        if checks % 1000 == 0 and cancel_event.is_set():
-            return None
+    for n in range(chunk_start, chunk_end + 1):
+        if checks % CHECK_INTERVAL == 0 and cancel_event.is_set():
+            return {
+                "status": "cancelled",
+                "worker": WORKER_NAME,
+                "chunk_start": chunk_start,
+                "chunk_end": chunk_end
+            }
 
         solution_candidate = string + str(n)
         result_hash = hashlib.sha256(solution_candidate.encode("utf-8")).hexdigest()
 
         if result_hash[:difficulty] == needle:
             return {
+                "status": "found",
                 "solution": solution_candidate,
                 "nonce": n,
                 "hash": result_hash,
-                "worker": WORKER_NAME
+                "worker": WORKER_NAME,
+                "chunk_start": chunk_start,
+                "chunk_end": chunk_end
             }
 
-        n += step
         checks += 1
 
+    return {
+        "status": "not_found",
+        "worker": WORKER_NAME,
+        "chunk_start": chunk_start,
+        "chunk_end": chunk_end
+    }
 
-def listen_for_cancel_messages():
+
+def listen_for_cancel_messages(credentials):
     global cancel_winner
 
     cancel_connection = pika.BlockingConnection(
-        pika.ConnectionParameters(
-            host=HOST,
-            port=PORT,
-            credentials=credentials
-        )
+        pika.ConnectionParameters(host=HOST, port=PORT, credentials=credentials)
     )
-
     cancel_channel = cancel_connection.channel()
     cancel_channel.exchange_declare(
         exchange=CANCEL_EXCHANGE_NAME,
         exchange_type="fanout"
     )
+
     result = cancel_channel.queue_declare(queue="", exclusive=True, auto_delete=True)
     cancel_queue_name = result.method.queue
     cancel_channel.queue_bind(
@@ -84,7 +95,6 @@ def listen_for_cancel_messages():
         on_message_callback=cancel_callback,
         auto_ack=True
     )
-
     cancel_channel.start_consuming()
 
 
@@ -96,22 +106,19 @@ def callback(channel, method, properties, body):
 
     string = json_payload["string"]
     difficulty = json_payload["difficulty"]
-    start = json_payload.get("start", 0)
-    step = json_payload.get("step", 1)
+    chunk_start = json_payload["chunk_start"]
+    chunk_end = json_payload["chunk_end"]
 
     with state_lock:
         current_correlation_id = properties.correlation_id
         cancel_winner = None
         cancel_event.clear()
 
-    print(
-        f"Received task: string={string}, "
-        f"difficulty={difficulty}, start={start}, step={step}"
-    )
+    print(f"Received chunk: {chunk_start}..{chunk_end}, difficulty={difficulty}")
 
-    result = solve_crypto_puzzle(string, difficulty, start, step)
+    result = solve_chunk(string, difficulty, chunk_start, chunk_end)
 
-    if result is None:
+    if result["status"] == "cancelled":
         with state_lock:
             stopped_by = cancel_winner or "another worker"
 
@@ -120,16 +127,14 @@ def callback(channel, method, properties, body):
         return
 
     print(
-        f"Solution found by Python worker: "
-        f"nonce={result['nonce']}, hash={result['hash']}"
+        f"Chunk result by {WORKER_NAME}: "
+        f"{result['status']}, chunk={chunk_start}..{chunk_end}"
     )
 
     channel.basic_publish(
         exchange="",
         routing_key=properties.reply_to,
-        properties=pika.BasicProperties(
-            correlation_id=properties.correlation_id
-        ),
+        properties=pika.BasicProperties(correlation_id=properties.correlation_id),
         body=json.dumps(result)
     )
 
@@ -137,31 +142,22 @@ def callback(channel, method, properties, body):
 
 
 credentials = pika.PlainCredentials(USER, PASSWORD)
-
 connection = pika.BlockingConnection(
-    pika.ConnectionParameters(
-        host=HOST,
-        port=PORT,
-        credentials=credentials
-    )
+    pika.ConnectionParameters(host=HOST, port=PORT, credentials=credentials)
 )
 
 channel = connection.channel()
-
-channel.queue_declare(
-    queue=QUEUE_NAME,
-    auto_delete=True
-)
-
+channel.queue_declare(queue=QUEUE_NAME, auto_delete=True)
 channel.basic_qos(prefetch_count=1)
-
-print("Python worker started...")
-print(f"Listening queue: {QUEUE_NAME}")
 
 threading.Thread(
     target=listen_for_cancel_messages,
+    args=(credentials,),
     daemon=True
 ).start()
+
+print("Python chunk worker started...")
+print(f"Listening queue: {QUEUE_NAME}")
 
 channel.basic_consume(
     queue=QUEUE_NAME,
@@ -172,6 +168,6 @@ channel.basic_consume(
 try:
     channel.start_consuming()
 except KeyboardInterrupt:
-    print("Stopping Python worker...")
+    print("Stopping Python chunk worker...")
     channel.stop_consuming()
     connection.close()

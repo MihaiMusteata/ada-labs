@@ -1,79 +1,69 @@
-# Laborator #2 TI - RabbitMQ, Ruby, Python, C#
+# RabbitMQ cu start/step
 
-Proiectul ruleaza un sistem distribuit local prin Docker Compose:
+Aceasta este varianta RabbitMQ în care serverul împarte spațiul de căutare în trei progresii aritmetice. Workerii Ruby, Python și C# citesc din aceeași coadă și caută soluția în paralel.
 
-- `rabbitmq` - broker RabbitMQ cu management UI;
-- `lab2_producer` - container pentru serverul/producerul Ruby;
-- `lab2_ruby_consumer` - container pentru workerul Ruby;
-- `lab2_python_consumer` - container pentru workerul Python;
-- `lab2_csharp_consumer` - container pentru workerul C#.
+## Distribuire taskuri
 
-Toate serviciile sunt in reteaua Docker `main`. Din containere, RabbitMQ se acceseaza cu hostul `rabbitmq`, portul `5672`, user `guest`, parola `guest`.
+Serverul trimite trei taskuri în coada `crypto-puzzle-inquiries`:
 
-## Pornire containere
+```text
+start=0, step=3
+start=1, step=3
+start=2, step=3
+```
+
+RabbitMQ livrează fiecare task către un singur worker disponibil. Fiecare worker verifică nonce-urile care respectă perechea `start/step`, de exemplu `0, 3, 6, 9...` pentru primul task.
+
+Dacă un worker găsește soluția, trimite rezultatul către server. Serverul afișează primul rezultat valid primit și publică un mesaj de anulare prin exchange-ul `crypto-puzzle-cancel`, astfel încât ceilalți workeri să oprească procesarea.
+
+## Pornire
 
 ```bash
-docker compose down
-docker compose build
-docker compose up -d
+chmod +x start_cluster.sh stop_cluster.sh
+./start_cluster.sh
 docker compose ps
-```
-
-Management UI RabbitMQ este disponibil pe:
-
-```text
-http://localhost:15672
-```
-
-Credentiale:
-
-```text
-guest / guest
 ```
 
 ## Rulare workeri
 
-Porneste fiecare worker intr-un terminal separat.
+Pornește workerii în trei terminale separate.
 
-Ruby worker:
+Ruby:
 
 ```bash
 docker exec -it lab2_ruby_consumer ruby ruby_computer.rb
 ```
 
-Python worker:
+Python:
 
 ```bash
 docker exec -it lab2_python_consumer python3 python_computer.py
 ```
 
-C# worker:
+C#:
 
 ```bash
 docker exec -it lab2_csharp_consumer dotnet run --project CSharpComputer/CSharpComputer.csproj
 ```
 
-## Rulare producer Ruby
+## Rulare server
 
-Intr-un alt terminal:
+În alt terminal:
 
 ```bash
 docker exec -it lab2_producer ruby ruby_server.rb
 ```
 
-Producerul trimite 3 taskuri pentru aceeasi problema, cu `start` egal cu `0`, `1`, `2` si `step` egal cu `3`. Workerii cauta solutia pe intervale diferite si primul raspuns primit este afisat impreuna cu timpul in milisecunde.
+Introdu dificultatea, de exemplu:
+
+```text
+6
+```
+
+Serverul afișează taskurile trimise și primul rezultat valid primit.
 
 ## Oprire
 
 ```bash
-docker compose down
-```
-
-## Probleme cu permisiunile RabbitMQ
-
-Daca serviciul `rabbitmq` se opreste imediat si in `docker compose ps` apare cu status `Exit 0`, pot exista permisiuni incorecte pentru datele persistente. Incearca:
-
-```bash
-sudo chmod -R 777 rabbitmq-data/log rabbitmq-data/data
-docker compose up -d
+./stop_cluster.sh
 ```

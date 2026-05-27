@@ -1,0 +1,47 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: lab2_redis_pub_sub
+    ports:
+      - "6382:6379"
+    volumes:
+      - ./redis-data:/data
+    networks:
+      - main
+
+  lab2_redis_pub_sub_producer: &ruby_python
+    container_name: lab2_redis_pub_sub_producer
+    build:
+      context: .
+    volumes:
+      - .:/home/student/lab2
+    stdin_open: true
+    tty: true
+    depends_on:
+      - redis
+    networks:
+      - main
+
+  lab2_redis_pub_sub_ruby_worker:
+    <<: *ruby_python
+    container_name: lab2_redis_pub_sub_ruby_worker
+
+  lab2_redis_pub_sub_python_worker:
+    <<: *ruby_python
+    container_name: lab2_redis_pub_sub_python_worker
+
+  lab2_redis_pub_sub_csharp_worker:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    container_name: lab2_redis_pub_sub_csharp_worker
+    volumes:
+      - .:/home/student/lab2
+    working_dir: /home/student/lab2
+    stdin_open: true
+    tty: true
+    depends_on:
+      - redis
+    networks:
+      - main
+
+networks:
+  main:
